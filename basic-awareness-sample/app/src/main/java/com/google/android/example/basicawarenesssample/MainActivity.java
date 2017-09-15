@@ -1,12 +1,12 @@
 /**
  * Copyright 2016 Google Inc. All Rights Reserved.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,7 +25,6 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -42,25 +41,25 @@ import com.google.android.gms.awareness.fence.DetectedActivityFence;
 import com.google.android.gms.awareness.fence.FenceState;
 import com.google.android.gms.awareness.fence.FenceUpdateRequest;
 import com.google.android.gms.awareness.fence.HeadphoneFence;
-import com.google.android.gms.awareness.snapshot.DetectedActivityResult;
-import com.google.android.gms.awareness.snapshot.HeadphoneStateResult;
-import com.google.android.gms.awareness.snapshot.WeatherResult;
+import com.google.android.gms.awareness.snapshot.DetectedActivityResponse;
+import com.google.android.gms.awareness.snapshot.HeadphoneStateResponse;
+import com.google.android.gms.awareness.snapshot.WeatherResponse;
 import com.google.android.gms.awareness.state.HeadphoneState;
 import com.google.android.gms.awareness.state.Weather;
-import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.common.api.ResultCallback;
-import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.ActivityRecognitionResult;
 import com.google.android.gms.location.DetectedActivity;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
 
 
 /**
  * Sample application which sets up a few context fences using the Awareness API, and takes
  * "snapshots" of data about the user and the device's surroundings.
+ *
+ * NOTE: for this sample to work, you need to add an API key in the manifest. See
+ * https://developers.google.com/awareness/android-api/get-a-key for instructions.
  */
 public class MainActivity extends AppCompatActivity {
-
-    private GoogleApiClient mApiClient;
 
     // The fence key is how callback code determines which fence fired.
     private final String FENCE_KEY = "fence_key";
@@ -95,60 +94,50 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        Context context = this;
-        mApiClient = new GoogleApiClient.Builder(context)
-                .addApi(Awareness.API)
-                .enableAutoManage(this, 1, null)
-                .addConnectionCallbacks(new GoogleApiClient.ConnectionCallbacks() {
-                    @Override
-                    public void onConnected(@Nullable Bundle bundle) {
-                        // Set up the PendingIntent that will be fired when the fence is triggered.
-                        Intent intent = new Intent(FENCE_RECEIVER_ACTION);
-                        mPendingIntent =
-                                PendingIntent.getBroadcast(MainActivity.this, 0, intent, 0);
+        Intent intent = new Intent(FENCE_RECEIVER_ACTION);
+        mPendingIntent = PendingIntent.getBroadcast(MainActivity.this, 0, intent, 0);
 
-                        // The broadcast receiver that will receive intents when a fence is triggered.
-                        mFenceReceiver = new FenceReceiver();
-                        registerReceiver(mFenceReceiver, new IntentFilter(FENCE_RECEIVER_ACTION));
-                        setupFences();
-                    }
+        mFenceReceiver = new FenceReceiver();
+        registerReceiver(mFenceReceiver, new IntentFilter(FENCE_RECEIVER_ACTION));
+        
+        mLogFragment = (LogFragment) getSupportFragmentManager().findFragmentById(R.id.log_fragment);
+    }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        setupFences();
+    }
+
+    @Override
+    protected void onPause() {
+        // Unregister the fence:
+        Awareness.getFenceClient(this).updateFences(new FenceUpdateRequest.Builder()
+                .removeFence(FENCE_KEY)
+                .build())
+                .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
-                    public void onConnectionSuspended(int i) {
+                    public void onSuccess(Void aVoid) {
+                        Log.i(TAG, "Fence was successfully unregistered.");
                     }
                 })
-                .build();
-        mLogFragment =
-                (LogFragment) getSupportFragmentManager().findFragmentById(R.id.log_fragment);
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.e(TAG, "Fence could not be unregistered: " + e);
+                    }
+                });
+
+        super.onPause();
     }
 
     @Override
     protected void onStop() {
         if (mFenceReceiver != null) {
             unregisterReceiver(mFenceReceiver);
+            mFenceReceiver = null;
         }
         super.onStop();
-    }
-
-    @Override
-    protected void onPause() {
-        // Unregister the fence:
-        Awareness.FenceApi.updateFences(
-                mApiClient,
-                new FenceUpdateRequest.Builder()
-                        .removeFence(FENCE_KEY)
-                        .build())
-                .setResultCallback(new ResultCallback<Status>() {
-                    @Override
-                    public void onResult(@NonNull Status status) {
-                        if(status.isSuccess()) {
-                            Log.i(TAG, "Fence was successfully unregistered.");
-                        } else {
-                            Log.e(TAG, "Fence could not be unregistered: " + status);
-                        }
-                    }
-                });
-        super.onPause();
     }
 
     /**
@@ -160,39 +149,49 @@ public class MainActivity extends AppCompatActivity {
 
         // Each type of contextual information in the snapshot API has a corresponding "get" method.
         //  For instance, this is how to get the user's current Activity.
-        Awareness.SnapshotApi.getDetectedActivity(mApiClient)
-                .setResultCallback(new ResultCallback<DetectedActivityResult>() {
+        Awareness.getSnapshotClient(this).getDetectedActivity()
+                .addOnSuccessListener(new OnSuccessListener<DetectedActivityResponse>() {
                     @Override
-                    public void onResult(@NonNull DetectedActivityResult dar) {
+                    public void onSuccess(DetectedActivityResponse dar) {
                         ActivityRecognitionResult arr = dar.getActivityRecognitionResult();
-
                         // getMostProbableActivity() is good enough for basic Activity detection.
                         // To work within a threshold of confidence,
                         // use ActivityRecognitionResult.getProbableActivities() to get a list of
                         // potential current activities, and check the confidence of each one.
                         DetectedActivity probableActivity = arr.getMostProbableActivity();
 
-                        // Confidence is an int between 0 and 100.
                         int confidence = probableActivity.getConfidence();
                         String activityStr = probableActivity.toString();
                         mLogFragment.getLogView().println("Activity: " + activityStr
                                 + ", Confidence: " + confidence + "/100");
                     }
+                })
+
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.e(TAG, "Could not detect activity: " + e);
+                    }
                 });
 
         // Pulling headphone state is similar, but doesn't involve analyzing confidence.
-        Awareness.SnapshotApi.getHeadphoneState(mApiClient)
-                .setResultCallback(new ResultCallback<HeadphoneStateResult>() {
+        Awareness.getSnapshotClient(this).getHeadphoneState()
+                .addOnSuccessListener(new OnSuccessListener<HeadphoneStateResponse>() {
                     @Override
-                    public void onResult(@NonNull HeadphoneStateResult headphoneStateResult) {
-                        HeadphoneState headphoneState = headphoneStateResult.getHeadphoneState();
+                    public void onSuccess(HeadphoneStateResponse headphoneStateResponse) {
+                        HeadphoneState headphoneState = headphoneStateResponse.getHeadphoneState();
                         boolean pluggedIn = headphoneState.getState() == HeadphoneState.PLUGGED_IN;
                         String stateStr =
                                 "Headphones are " + (pluggedIn ? "plugged in" : "unplugged");
                         mLogFragment.getLogView().println(stateStr);
                     }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.e(TAG, "Could not get headphone state: " + e);
+                    }
                 });
-
 
         // Some of the data available via Snapshot API requires permissions that must be checked
         // at runtime.  Weather snapshots are a good example of this.  Since weather is protected
@@ -200,12 +199,11 @@ public class MainActivity extends AppCompatActivity {
         // the easiest thing to do is put weather snapshot code in its own method.  That way it
         // can be called from here when permission has already been granted on subsequent runs,
         // and from the permission request callback code when permission is first granted.
-        if (checkAndRequestWeatherPermissions()) {
-            getWeatherSnapshot();
-        }
+        checkAndRequestWeatherPermissions();
     }
 
-    /** Helper method to retrieve weather data using the Snapshot API.  Since Weather is protected
+    /**
+     * Helper method to retrieve weather data using the Snapshot API.  Since Weather is protected
      * by a runtime permission, this snapshot code is going to be called in multiple places:
      * {@link #printSnapshot()} when the permission has already been accepted, and
      * {@link #onRequestPermissionsResult(int, String[], int[])} when the permission is requested
@@ -214,17 +212,19 @@ public class MainActivity extends AppCompatActivity {
     private void getWeatherSnapshot() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
-            Awareness.SnapshotApi.getWeather(mApiClient)
-                    .setResultCallback(new ResultCallback<WeatherResult>() {
+            Awareness.getSnapshotClient(this).getWeather()
+                    .addOnSuccessListener(new OnSuccessListener<WeatherResponse>() {
                         @Override
-                        public void onResult(@NonNull WeatherResult weatherResult) {
-                            if (!weatherResult.getStatus().isSuccess()) {
-                                Log.e(TAG, "Could not get weather.");
-                                return;
-                            }
-                            Weather weather = weatherResult.getWeather();
+                        public void onSuccess(WeatherResponse weatherResponse) {
+                            Weather weather = weatherResponse.getWeather();
                             weather.getConditions();
                             mLogFragment.getLogView().println("Weather: " + weather);
+                        }
+                    })
+                    .addOnFailureListener(new OnFailureListener() {
+                        @Override
+                        public void onFailure(@NonNull Exception e) {
+                            Log.e(TAG, "Could not get weather: " + e);
                         }
                     });
         }
@@ -232,9 +232,10 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Helper method to handle requesting the runtime permissions required for weather snapshots.
+     *
      * @return true if the permission has already been granted, false otherwise.
      */
-    private boolean checkAndRequestWeatherPermissions() {
+    private void checkAndRequestWeatherPermissions() {
         if (ContextCompat.checkSelfPermission(
                 MainActivity.this,
                 Manifest.permission.ACCESS_FINE_LOCATION) !=
@@ -242,19 +243,15 @@ public class MainActivity extends AppCompatActivity {
 
             if (ActivityCompat.shouldShowRequestPermissionRationale
                     (this, Manifest.permission.ACCESS_FINE_LOCATION)) {
+                Log.i(TAG, "Permission previously denied and app shouldn't ask again.  Skipping" +
+                        " weather snapshot.");
+            } else {
                 ActivityCompat.requestPermissions(
                         MainActivity.this,
                         new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
                         MY_PERMISSION_LOCATION
                 );
-            } else {
-                Log.i(TAG, "Permission previously denied and app shouldn't ask again.  Skipping" +
-                        " weather snapshot.");
             }
-            return false;
-
-        } else {
-            return true;
         }
     }
 
@@ -310,19 +307,19 @@ public class MainActivity extends AppCompatActivity {
         // callbacks.
 
         // Register the fence to receive callbacks.
-        Awareness.FenceApi.updateFences(
-                mApiClient,
-                new FenceUpdateRequest.Builder()
-                        .addFence(FENCE_KEY, exercisingWithHeadphonesFence, mPendingIntent)
-                        .build())
-                .setResultCallback(new ResultCallback<Status>() {
+        Awareness.getFenceClient(this).updateFences(new FenceUpdateRequest.Builder()
+                .addFence(FENCE_KEY, exercisingWithHeadphonesFence, mPendingIntent)
+                .build())
+                .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
-                    public void onResult(@NonNull Status status) {
-                        if(status.isSuccess()) {
-                            Log.i(TAG, "Fence was successfully registered.");
-                        } else {
-                            Log.e(TAG, "Fence could not be registered: " + status);
-                        }
+                    public void onSuccess(Void aVoid) {
+                        Log.i(TAG, "Fence was successfully registered.");
+                    }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.e(TAG, "Fence could not be registered: " + e);
                     }
                 });
     }
@@ -337,7 +334,7 @@ public class MainActivity extends AppCompatActivity {
             if (!TextUtils.equals(FENCE_RECEIVER_ACTION, intent.getAction())) {
                 mLogFragment.getLogView()
                         .println("Received an unsupported action in FenceReceiver: action="
-                        + intent.getAction());
+                                + intent.getAction());
                 return;
             }
 
@@ -364,5 +361,3 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 }
-
-
