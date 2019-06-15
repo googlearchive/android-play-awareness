@@ -26,7 +26,7 @@ Support
 - Stack Overflow: http://stackoverflow.com/questions/tagged/awareness-api
 
 If you've found an error in this sample, please file an issue:
-https://github.com/googlesamples/android-awareness-api/issues
+https://github.com/googlesamples/android-play-awareness/issues
 
 Patches are encouraged, and may be submitted according to the instructions in
 CONTRIBUTING.md.
